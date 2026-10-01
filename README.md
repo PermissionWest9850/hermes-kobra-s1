@@ -516,3 +516,20 @@ Upstream project:
 ```text
 https://github.com/mikehatch/KlipperMCP
 ```
+
+## ACE Pro slot mapping
+
+The tested Kobra S1 reports one ACE Pro with four available gates:
+
+| ACE slot | Tool command | Current verification |
+| --- | --- | --- |
+| Slot 1 | `T0` | Practically verified with PLA |
+| Slot 2 | `T1` | System-confirmed, slot was empty during testing |
+| Slot 3 | `T2` | System-confirmed, slot was empty during testing |
+| Slot 4 | `T3` | System-confirmed, slot was empty during testing |
+
+The reported tool-to-gate mapping is `[0, 1, 2, 3]`.
+
+The OrcaSlicer machine profile uses `T[initial_tool]`, so the generated tool command should follow the selected ACE slot instead of being hard-coded to `T0`.
+
+Slots 2-4 were recognized correctly by the system but have not yet been practically filament-tested.
