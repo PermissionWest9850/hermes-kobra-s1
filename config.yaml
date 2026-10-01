@@ -1,0 +1,27 @@
+model:
+  default: gpt-5.5
+  provider: openai-codex
+
+toolsets:
+  - hermes-cli
+
+agent:
+  max_turns: 150
+
+terminal:
+  backend: local
+  cwd: "${PROJECT_DIR}"
+  home_mode: real
+
+approvals:
+  mode: smart
+  cron_mode: deny
+
+mcp_servers:
+  kobra:
+    command: node
+    args:
+      - "${KLIPPER_MCP_PATH}/dist/index.js"
+    env:
+      PRINTER_KOBRA: "${KOBRA_S1_MOONRAKER_URL}"
+    enabled: true

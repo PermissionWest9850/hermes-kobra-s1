@@ -1,0 +1,50 @@
+name: kobra-s1-3d-print
+version: 0.1.0
+author: PermissionWest9850
+license: MIT
+description: Hermes profile for FreeCAD, OrcaSlicer and safe Anycubic Kobra S1 control through KlipperMCP.
+hermes_requires: ">=0.21.5"
+
+env_requires:
+  - name: KOBRA_S1_MOONRAKER_URL
+    description: Moonraker URL of the Kobra S1, for example http://192.168.x.x:7125
+
+  - name: KLIPPER_MCP_PATH
+    description: Absolute path to the local KlipperMCP installation
+
+  - name: PROJECT_DIR
+    description: Absolute path to the persistent 3D-print project directory
+
+  - name: FREECADCMD_PATH
+    description: Path to freecadcmd
+    required: false
+    default: /usr/bin/freecadcmd
+
+  - name: ORCA_SLICER_PATH
+    description: Path to the OrcaSlicer AppImage
+    required: false
+    default: /opt/orcaslicer/OrcaSlicer.AppImage
+
+  - name: ORCA_PROFILE_ROOT
+    description: Path to the Anycubic profile directory inside the local OrcaSlicer installation
+    required: false
+    default: /opt/orcaslicer/squashfs-root/resources/profiles/Anycubic
+
+  - name: KOBRA_MACHINE_PROFILE
+    description: Optional custom Kobra S1 machine profile JSON
+    required: false
+
+  - name: KOBRA_PROCESS_PROFILE
+    description: Optional custom OrcaSlicer process profile JSON
+    required: false
+
+  - name: KOBRA_FILAMENT_PROFILE
+    description: Optional custom filament profile JSON
+    required: false
+
+distribution_owned:
+  - SOUL.md
+  - config.yaml
+  - scripts
+  - patches
+  - distribution.yaml

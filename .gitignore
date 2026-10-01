@@ -1,0 +1,31 @@
+# Secrets / local credentials
+.env
+.env.*
+!.env.example
+!.env.template
+auth.json
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Hermes runtime/user data
+memories/
+sessions/
+plans/
+workspace/
+home/
+backups/
+cache/
+local/
+
+# Generated 3D-print files
+*.gcode
+*.stl
+*.3mf
+
+# Temporary/editor files
+*.tmp
+*.bak
+*~
+.DS_Store

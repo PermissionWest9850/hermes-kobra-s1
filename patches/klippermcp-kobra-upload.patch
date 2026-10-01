@@ -1,0 +1,182 @@
+diff --git a/src/moonraker/client.ts b/src/moonraker/client.ts
+index 9764240..1ab4653 100644
+--- a/src/moonraker/client.ts
++++ b/src/moonraker/client.ts
+@@ -154,6 +154,7 @@ export class MoonrakerClient {
+     return this.request<UploadResult>("POST", "/server/files/upload", {
+       body: formData,
+       isFormData: true,
++      timeoutMs: 120_000,
+     });
+   }
+ 
+diff --git a/src/tools/index.ts b/src/tools/index.ts
+index e0f6b26..0d795a6 100644
+--- a/src/tools/index.ts
++++ b/src/tools/index.ts
+@@ -53,6 +53,10 @@ import {
+   listGcodeFilesSchema,
+   listGcodeFiles,
+ } from "./listGcodeFiles.js";
++import {
++  uploadGcodeFileSchema,
++  uploadGcodeFile,
++} from "./uploadGcodeFile.js";
+ import {
+   getGcodeThumbnailSchema,
+   getGcodeThumbnail,
+@@ -189,6 +193,13 @@ export function registerTools(
+     async (params) => listGcodeFiles(printerManager, params)
+   );
+ 
++  server.tool(
++    "upload_gcode_file",
++    "Upload a local GCode file to the printer's gcodes storage. This changes printer storage but NEVER starts a print. Use only after explicit user approval.",
++    uploadGcodeFileSchema,
++    async (params) => uploadGcodeFile(printerManager, params)
++  );
++
+   server.tool(
+     "get_gcode_thumbnail",
+     "Get the thumbnail image for a GCode file. Returns the actual image that can be displayed. Choose size preference: small, medium, large, or largest.",
+diff --git a/src/tools/uploadGcodeFile.ts b/src/tools/uploadGcodeFile.ts
+new file mode 100644
+index 0000000..a435aac
+--- /dev/null
++++ b/src/tools/uploadGcodeFile.ts
+@@ -0,0 +1,135 @@
++import { z } from "zod";
++import { promises as fs } from "node:fs";
++import path from "node:path";
++import { PrinterManager } from "../printerManager.js";
++import { MoonrakerError } from "../moonraker/errors.js";
++
++export const uploadGcodeFileSchema = {
++  printer: z.string().optional(),
++  localPath: z.string().min(1),
++  remoteFilename: z.string().min(1).optional(),
++};
++
++export type UploadGcodeFileParams = z.infer<
++  z.ZodObject<typeof uploadGcodeFileSchema>
++>;
++
++export async function uploadGcodeFile(
++  printerManager: PrinterManager,
++  params: UploadGcodeFileParams
++): Promise<{ content: Array<{ type: "text"; text: string }> }> {
++  try {
++    const source = path.resolve(params.localPath);
++
++    if (!path.isAbsolute(params.localPath)) {
++      throw new Error("localPath must be an absolute path");
++    }
++
++    if (path.extname(source).toLowerCase() !== ".gcode") {
++      throw new Error("localPath must point to a .gcode file");
++    }
++
++    const stat = await fs.stat(source);
++
++    if (!stat.isFile()) {
++      throw new Error(`Local path is not a file: ${source}`);
++    }
++
++    const filename = params.remoteFilename ?? path.basename(source);
++
++    if (
++      params.remoteFilename &&
++      (
++        params.remoteFilename !== path.basename(params.remoteFilename) ||
++        /[\\/]/.test(params.remoteFilename)
++      )
++    ) {
++      throw new Error(
++        "remoteFilename must be a plain filename without path components"
++      );
++    }
++
++    if (path.extname(filename).toLowerCase() !== ".gcode") {
++      throw new Error("remoteFilename must end with .gcode");
++    }
++
++    const client = printerManager.getClient(params.printer);
++
++    const files = await client.listGcodeFiles();
++    const existing = files.find((file) => file.path === filename);
++
++    if (existing) {
++      return {
++        content: [{
++          type: "text",
++          text: JSON.stringify({
++            uploaded: false,
++            conflict: true,
++            printer: client.printerName,
++            filename,
++            existingSize: existing.size,
++            message: "Datei existiert bereits. Kein Überschreiben.",
++          }, null, 2),
++        }],
++      };
++    }
++
++    const content = await fs.readFile(source, "utf8");
++
++    const result = await client.uploadFile(
++      "gcodes",
++      filename,
++      content
++    );
++
++    return {
++      content: [{
++        type: "text",
++        text: JSON.stringify({
++          uploaded: true,
++          printer: client.printerName,
++          localPath: source,
++          filename,
++          size: stat.size,
++          result,
++          message: "G-Code hochgeladen. Kein Druck wurde gestartet.",
++        }, null, 2),
++      }],
++    };
++  } catch (error) {
++    if (error instanceof MoonrakerError) {
++      return {
++        content: [{
++          type: "text",
++          text: JSON.stringify({
++            error: true,
++            message: error.toUserMessage(),
++          }, null, 2),
++        }],
++      };
++    }
++
++    if (error instanceof Error) {
++      return {
++        content: [{
++          type: "text",
++          text: JSON.stringify({
++            error: true,
++            message: error.message,
++          }, null, 2),
++        }],
++      };
++    }
++
++    return {
++      content: [{
++        type: "text",
++        text: JSON.stringify({
++          error: true,
++          message: "Unerwarteter Fehler",
++          details: String(error),
++        }, null, 2),
++      }],
++    };
++  }
++}
