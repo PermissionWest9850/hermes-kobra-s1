@@ -170,6 +170,30 @@ The v0.2.0 release candidate was tested end-to-end on a fresh **Debian 13 (Trixi
 
 ---
 
+### ✅ Real printer connection verified
+
+The read-only end-to-end connection was successfully verified against a real
+**Anycubic Kobra S1 Combo with ACE Pro**:
+
+`Hermes → KlipperMCP → Moonraker → Rinkhals → Kobra S1 → ACE Pro`
+
+The live test confirmed:
+
+- ✅ printer state reported as `ready`
+- ✅ print state reported as `standby`
+- ✅ nozzle and bed status readable
+- ✅ ACE Pro detected as `ACE 1`
+- ✅ all 4 ACE gates detected
+- ✅ `T0 / T1 / T2 / T3` tool mapping readable
+- ✅ Hermes successfully retrieved the real printer and ACE status through KlipperMCP
+- ✅ no GCode was uploaded
+- ✅ no print was started
+- ✅ no printer configuration was changed
+
+This verification was intentionally limited to read-only operations.
+
+---
+
 ## 🖥️ Reference test system
 
 <p align="center">
