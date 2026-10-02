@@ -986,6 +986,19 @@ Please do **not** include real credentials, private LAN details or generated `.e
 
 ---
 
+## ℹ️ Third-party projects and trademarks
+
+This is an independent community project and is not affiliated with, sponsored by,
+or endorsed by Anycubic, Fujitsu, Nous Research, FreeCAD, OrcaSlicer, KlipperMCP,
+or the Rinkhals project.
+
+Third-party software remains subject to its respective upstream license.
+
+For attribution and license details, see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+---
+
 ## 📄 License
 
 MIT License — see [LICENSE](LICENSE).
