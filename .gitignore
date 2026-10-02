@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.EXAMPLE
 !.env.template
 auth.json
 
@@ -16,6 +17,7 @@ plans/
 workspace/
 home/
 backups/
+.hermes-backups/
 cache/
 local/
 

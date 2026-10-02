@@ -1,5 +1,5 @@
 name: kobra-s1-3d-print
-version: 0.1.0
+version: 0.2.0
 author: PermissionWest9850
 license: MIT
 description: Hermes profile for FreeCAD, OrcaSlicer and safe Anycubic Kobra S1 control through KlipperMCP.
@@ -7,7 +7,7 @@ hermes_requires: ">=0.21.5"
 
 env_requires:
   - name: KOBRA_S1_MOONRAKER_URL
-    description: Moonraker URL of the Kobra S1, for example http://192.168.x.x:7125
+    description: Moonraker URL of the Kobra S1, for example http://PRINTER_IP:7125
 
   - name: KLIPPER_MCP_PATH
     description: Absolute path to the local KlipperMCP installation
@@ -45,6 +45,7 @@ env_requires:
 distribution_owned:
   - SOUL.md
   - config.yaml
+  - .env.EXAMPLE
   - scripts
   - patches
   - distribution.yaml
