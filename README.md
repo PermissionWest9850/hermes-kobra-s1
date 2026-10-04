@@ -58,11 +58,46 @@ curl -fsSL https://raw.githubusercontent.com/PermissionWest9850/hermes-kobra-s1/
 The installer guides you through the parts that require your input:
 
 1. system bootstrap
-2. Hermes setup/login when no provider is configured yet
+2. Hermes installation and a local provider/model credential check (no automatic login)
 3. project directory
 4. Kobra S1 Moonraker IP or URL
 5. profile preparation
 6. final read-only verification
+
+### Hermes authentication is a separate step
+
+The official Hermes installer is invoked with `--skip-setup`. This installs Hermes
+without automatically starting Portal, OAuth, a browser, or the setup wizard.
+Existing Hermes provider/model settings and credentials are retained unchanged.
+
+The Kobra installer then checks **local credential evidence for the selected
+provider/model** read-only. Default metadata such as `provider: auto` is **not**
+proof of authentication. The check never imports Hermes runtime/auth handlers,
+refreshes tokens, executes credential commands, or calls a provider. Even when
+local credentials are present, online authentication, account entitlement, and
+model access are **not tested**. Unsupported or ambiguous routes are reported as
+unverified, not invalid, and remain unchanged.
+
+A fresh installation without established credentials ends successfully with:
+
+```text
+Hermes auth/setup pending
+```
+
+FreeCAD, OrcaSlicer, KlipperMCP, the Kobra profile, and read-only diagnostics can
+still be installed and tested. **This success means the toolchain is installed,
+not that LLM chat is authenticated.** As the normal user, complete provider/model
+selection and your own authentication separately:
+
+```bash
+hermes model
+# Or, for the full interactive wizard:
+hermes setup
+```
+
+If `HERMES_HOME` was explicitly set during installation, keep the same value for
+these commands. No credentials are generated or copied by this project. A blocked
+external Portal/OAuth authorization flow is not itself a Kobra-installer defect.
 
 ### Prefer to inspect the installer first?
 
@@ -144,7 +179,48 @@ An approval to upload a file is therefore **not** treated as permission to start
 
 ---
 
-## ✅ Clean-VM tested
+> [!IMPORTANT]
+> **The local v0.3.0 installation/toolchain passed Minimal-Debian-13 validation; it is not released.**
+> Steps 1–2 protect profile files and require Orca verification. Local steps 3–4
+> add fresh-only lockfile KlipperMCP installation and a strict read-only Doctor.
+> Local step 5 adds an explicitly confirmed, backup-protected Orca-profile update
+> mode; normal reruns still preserve existing profiles.
+> See [implementation and trust details](docs/v0.3.0-preparation.md),
+> [dependency snapshot](docs/klippermcp-dependencies.md) and [Doctor usage](docs/doctor.md).
+> Hermes authentication remains **pending**; exact ACE model identity remains
+> **NOT VERIFIED**. The historical results below are explicitly marked **v0.2.0**.
+> Debian 12 and Ubuntu 24.04
+> remain untested; no additional distribution support is claimed.
+
+## ✅ v0.3.0 Minimal-Debian-13 validation
+
+The current local v0.3.0 installation/toolchain was validated on a fresh minimal
+**Debian 13 (Trixie)** VM without `sudo`, using exactly one native `su` root
+authentication. The official Hermes installer used `--skip-setup`; no automatic
+Portal/OAuth flow was started and no provider credentials were created.
+
+| Check | Result |
+|---|---|
+| Installer first run through `[9/9]` | Exit 0 |
+| `install.sh --check` and `kobra3d doctor`, before and after rerun | All exit 0 |
+| Full installer rerun without another root authentication | Exit 0 |
+| Protected files preserved | 156 files unchanged, including bytes, modes and ownership |
+| Final VM test suite | 341 tests: 340 passed, 0 failures/errors, 1 skipped AppImage-path test; exit 0 |
+| Real npm installation, TypeScript build and MCP stdio integration | Passed; no real upload or print start |
+| Hermes provider/model authentication | **Hermes auth/setup pending**; online authentication and model access not verified |
+| Exact ACE model identity | **NOT VERIFIED — exact ACE model identity not exposed by API** |
+
+The skipped path-specific AppImage test was not counted as PASS. Doctor separately
+verified the installed OrcaSlicer 2.4.2 artifact against the pinned SHA256/SHA512.
+Read-only status checks confirmed the Kobra S1, enabled MMU, four gates and the
+reported T0–T3 to gate 0–3 mapping; physical routing was not tested. No real GCode
+upload, print start, movement, heating or printer-configuration change occurred.
+
+For the pending LLM setup, run `hermes model` separately. Default provider/model
+metadata is not evidence of usable authentication. See the
+[current validation scope and historical stage reports](docs/v0.3.0-preparation.md).
+
+## Historical v0.2.0 Clean-VM results
 
 The v0.2.0 release candidate was tested end-to-end on a fresh **Debian 13 (Trixie)** VM.
 
@@ -170,7 +246,11 @@ The v0.2.0 release candidate was tested end-to-end on a fresh **Debian 13 (Trixi
 
 ---
 
-### ✅ Real printer connection verified
+### Historical v0.2.0 real-printer connection verification
+
+The following is a historical intermediate report, retained unchanged. Its
+`ACE 1` observation is not proof of the exact ACE model identity for v0.3.0;
+that identity remains **NOT VERIFIED** in the current validation.
 
 The read-only end-to-end connection was successfully verified against a real
 **Anycubic Kobra S1 Combo with ACE Pro**:
@@ -342,6 +422,7 @@ A normal second run should:
 - reuse FreeCAD
 - reuse OrcaSlicer
 - keep the existing `.env`
+- keep existing Hermes `config.yaml`, `SOUL.md`, scripts and patches unchanged
 - keep existing Orca profiles unchanged
 - reuse the saved project directory
 - reuse the saved Moonraker URL
@@ -353,7 +434,68 @@ Typical messages:
 Existing Hermes configuration found; keeping current provider/model.
 Existing Kobra profile configuration found; keeping .env unchanged.
 Existing Orca profiles kept unchanged.
+Existing Hermes profile files kept unchanged.
 ```
+
+To explicitly update a complete existing Hermes profile from a local clone:
+
+```bash
+bash install.sh --update-config --dry-run
+bash install.sh --update-config
+```
+
+The separate mode previews changed paths, requires `UPDATE CONFIG` confirmation
+(`--yes` cannot authorize replacement), verifies a timestamped backup and
+rolls back replacement failures. It never changes `.env` or runs the installer
+bootstrap. [Details and recovery limits](docs/v0.3.0-preparation.md).
+
+---
+
+## 🔄 Explicit Orca-profile update (local v0.3.0 preparation)
+
+From a complete local checkout, as your normal user:
+
+```bash
+bash install.sh --update-profiles --dry-run
+bash install.sh --update-profiles
+```
+
+`PROFILE_DIR` selects the saved Kobra profile; only its literal `.env` path
+settings choose the existing three workspace profiles and local factory source.
+The mode previews field changes, warns that local customizations are replaced
+rather than merged, and requires the exact `UPDATE PROFILES` phrase on `/dev/tty`.
+`--yes` and piped input never authorize it. After confirmation it verifies a
+private backup, detects stale preview/concurrent edits, and rolls back failures
+without overwriting unknown new revisions. Incomplete/conflicting recovery data
+is retained for manual inspection, not silently deleted.
+
+No packages, downloads, source-tree migration, `.env` changes, slicer execution
+or printer access. Dry-run and no-op create no backups, stages or lock files.
+Normal installer reruns continue to leave existing profiles unchanged.
+**Multiple-file replacement is not atomic across power loss/SIGKILL.**
+[Selection, redacted diff, backup/recovery details and source trust limits](docs/update-profiles.md).
+
+---
+
+## 🩺 Read-only Doctor
+
+From a complete local checkout:
+
+```bash
+./install.sh --check
+./install.sh --check --offline
+```
+
+A newly created launcher also provides `kobra3d doctor [--offline]`, calling the
+same Python core. **Existing launchers and profile payloads are kept unchanged**;
+an old launcher may not yet recognize `doctor`. Use the checkout command above
+until a deliberate, separately reviewed launcher/profile update.
+
+Doctor performs no installation, repair, backup, log creation or printer action.
+Network traffic is restricted to fixed status-only GET endpoints; redirects are
+not followed. It does not run Hermes, FreeCAD, Orca or a KlipperMCP handshake.
+Status: `PASS`, `WARN`, `FAIL`, `NOT VERIFIED`; exits 0/1/2 for success, incomplete
+evidence/warnings, required-check failure. [Checks and limits](docs/doctor.md).
 
 ---
 
@@ -399,7 +541,11 @@ The patch adds a dedicated GCode upload tool with conservative behavior:
 
 ### npm audit
 
-The tested KlipperMCP dependency tree currently reports transitive npm audit advisories.
+The pinned lockfile was audited in an isolated local fixture on **2026-10-03**.
+It reports **8 vulnerable package entries: 5 high, 2 moderate, 1 low**.
+[Exact versions, GHSA evidence and stdio usage context](docs/klippermcp-dependencies.md).
+The supplied setup does not launch a public KlipperMCP HTTP service; this does
+**not** establish that all advisories are non-exploitable.
 
 The installer intentionally does **not** run:
 
@@ -415,9 +561,15 @@ automatically. Silently changing the dependency tree would make the tested revis
 
 The installer selects the official **OrcaSlicer 2.4.2** AppImage from the upstream GitHub release.
 
-When an upstream `SHA256SUMS` release asset is unavailable, the installer prints a warning and continues with the HTTPS-protected GitHub download.
+The local v0.3.0 preparation requires the pinned **SHA256 and historical AUR
+Community SHA512** in `checksums/orcaslicer-2.4.2.json`. A missing pin or mismatch
+aborts before installation or AppImage execution/extraction; existing AppImages
+are also verified read-only before reuse. There is no TLS-only fallback.
 
-This residual supply-chain limitation is documented rather than hidden.
+**The AUR anchor is not an authenticated upstream signature.** It is an
+explicitly reviewed additional community publication for x86_64 only. Automatic
+aarch64 installation/reuse is blocked pending comparable provenance review.
+[Sources, trust limitations and test scope](docs/v0.3.0-preparation.md).
 
 ---
 
@@ -436,6 +588,12 @@ Do not commit:
 - Hermes sessions or memories
 
 The real profile `.env` is created locally and should remain local.
+`backups/`, `.hermes-backups/`, `cache/`, `.env`/non-example variants and
+`auth.json` are excluded by `.gitignore`. Never use `git add -f` on these paths.
+Git exclusions cannot prevent deliberately forced additions or secrets embedded
+in otherwise public files; inspect the staged diff and run a secret scan before
+a separately approved future commit. User-edited profile backups may contain
+private values even though the update helper excludes `.env`.
 
 Public examples use placeholders such as:
 
@@ -507,15 +665,13 @@ Manual read-only test:
 curl http://PRINTER_IP:7125/server/info
 ```
 
-### OrcaSlicer checksum warning
+### OrcaSlicer checksum failure
 
-A warning similar to:
-
-```text
-WARNING: No upstream SHA256SUMS asset found for OrcaSlicer 2.4.2
-```
-
-does not mean that the AppImage download itself failed. The installer continues using the official GitHub HTTPS download.
+The local v0.3.0 preparation stops on missing/mismatching checksum pins,
+unreviewed architectures or incomplete existing installations. Do not disable
+the check or overwrite an existing installation to suppress the error. Preserve
+existing files and review the source/version against the checksum manifest.
+The published v0.2.0 warning-only behavior is not the new verification policy.
 
 ### Existing Orca profiles
 
@@ -526,7 +682,11 @@ The installer never silently overwrites them.
 
 ### Existing KlipperMCP checkout
 
-The installer reuses the expected checkout and recognizes an already-applied patch. It does not silently update an unexpected revision.
+An existing checkout is checked read-only for the full pinned commit, applied
+patch, dependencies and build. Missing/inconsistent components are refused,
+never silently patched, rebuilt, removed or upgraded. A fresh absent target uses
+`npm ci` with the pinned upstream lockfile. Legacy dependency integrity may
+remain `NOT VERIFIED`; see [the exact limits](docs/klippermcp-dependencies.md).
 
 ---
 
@@ -772,11 +932,14 @@ Clone the tested KlipperMCP revision:
 cd ~
 git clone https://github.com/mikehatch/KlipperMCP.git
 cd KlipperMCP
-git checkout 425e169
-npm install
+git checkout 425e16905c16b6c078028b5063fcb21e0591b190
+npm ci --no-audit --no-fund --logs-max=0 --include=dev
 ```
 
-KlipperMCP requires Node.js 20 or newer.
+KlipperMCP requires Node.js 20 or newer. These manual commands are for a fresh
+checkout only: `npm ci` must not be used as an automatic repair of an existing
+installation. The installer now separates fresh lockfile installs from read-only
+reuse and verifies the full pinned commit.
 
 ### Apply the Kobra upload patch
 
@@ -794,7 +957,7 @@ git apply ~/.hermes/profiles/kobra-s1-3d-print/patches/klippermcp-kobra-upload.p
 npm run build
 ```
 
-The patch has been verified against KlipperMCP commit `425e169`.
+The patch has been verified against KlipperMCP commit `425e16905c16b6c078028b5063fcb21e0591b190`.
 
 It:
 
@@ -918,7 +1081,7 @@ The included patch:
 patches/klippermcp-kobra-upload.patch
 ```
 
-is based on KlipperMCP commit `425e169` and adds the upload workflow used by this Kobra S1 setup.
+is based on KlipperMCP commit `425e16905c16b6c078028b5063fcb21e0591b190` and adds the upload workflow used by this Kobra S1 setup.
 
 KlipperMCP declares the MIT license in its `package.json`.
 
@@ -963,7 +1126,7 @@ Successful [9/9] verification again
 
 - [ ] additional Kobra S1 material/profile presets
 - [ ] more documented ACE Pro material combinations
-- [ ] stronger optional release checksum verification
+- [x] v0.3.0 Minimal-Debian-13 installation/toolchain validation (Hermes auth remains pending)
 - [ ] broader Linux distribution testing
 - [ ] additional architecture testing
 - [ ] installation screenshots / GIF

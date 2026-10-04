@@ -8,7 +8,7 @@ set -Eeuo pipefail
 REPO_URL="${KOBRA_REPO_URL:-https://github.com/PermissionWest9850/hermes-kobra-s1.git}"
 REPO_ARCHIVE_URL="${KOBRA_REPO_ARCHIVE_URL:-https://github.com/PermissionWest9850/hermes-kobra-s1/archive/refs/heads/main.tar.gz}"
 KLIPPERMCP_REPO="${KLIPPERMCP_REPO:-https://github.com/mikehatch/KlipperMCP.git}"
-KLIPPERMCP_COMMIT="425e169"
+KLIPPERMCP_COMMIT="425e16905c16b6c078028b5063fcb21e0591b190"
 ORCA_VERSION="2.4.2"
 PROFILE_NAME="kobra-s1-3d-print"
 DEFAULT_PROJECT_DIR="$HOME/3d-print"
@@ -22,10 +22,18 @@ OPT_ORCA_APPIMAGE="/opt/orcaslicer/OrcaSlicer.AppImage"
 OPT_ORCA_PROFILE_ROOT="/opt/orcaslicer/squashfs-root/resources/profiles/Anycubic"
 DRY_RUN=0
 ASSUME_YES=0
+UPDATE_CONFIG=0
+UPDATE_PROFILES=0
+CHECK_MODE=0
+CHECK_OFFLINE=0
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
+    --update-config) UPDATE_CONFIG=1 ;;
+    --update-profiles) UPDATE_PROFILES=1 ;;
+    --check) CHECK_MODE=1 ;;
+    --offline) CHECK_OFFLINE=1 ;;
     -y|--yes) ASSUME_YES=1 ;;
     -h|--help)
       cat <<'HELP'
@@ -33,6 +41,24 @@ Hermes Kobra S1 installer
 
 Usage:
   bash install.sh [--dry-run] [--yes]
+  bash install.sh --update-config [--dry-run]
+  bash install.sh --update-profiles [--dry-run]
+  bash install.sh --check [--offline]
+
+--check runs read-only diagnostics before authentication/bootstrap/downloads.
+--offline skips all Moonraker requests; no repairs or backups in check mode.
+
+--update-config is local-only: preview changes, require UPDATE CONFIG confirmation,
+then verify a backup before replacing managed files. --yes does not confirm it.
+No packages, downloads, .env changes or printer access in these separate modes.
+
+--update-profiles updates only the three existing workspace Orca profiles selected
+by PROFILE_DIR/.env. A readable field diff and exact UPDATE PROFILES confirmation
+on /dev/tty are required. --yes/piped input never confirms an update.
+Verified private backup, conflict detection and conservative failure rollback;
+normal installer reruns still leave existing profiles unchanged.
+--dry-run only compares: no confirmation, lock, stage or backup is created.
+--check, --update-config and --update-profiles cannot be combined.
 
 Environment overrides:
   KOBRA_S1_MOONRAKER_URL  Printer Moonraker URL or bare IP
@@ -46,6 +72,15 @@ HELP
     *) echo "Unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
+
+if (( CHECK_MODE + UPDATE_CONFIG + UPDATE_PROFILES > 1 )); then
+  printf 'ERROR: --check, --update-config and --update-profiles are separate modes.\n' >&2
+  exit 2
+fi
+if [[ "$CHECK_OFFLINE" == "1" && "$CHECK_MODE" != "1" ]]; then
+  printf 'ERROR: --offline is only valid with --check.\n' >&2
+  exit 2
+fi
 
 if [[ "${KOBRA_INSTALL_DRY_RUN:-0}" == "1" ]]; then
   DRY_RUN=1
@@ -138,6 +173,26 @@ check_internet_dns() {
   else
     fail "Internet/DNS check failed before installing requirements. Check VM networking and DNS, then rerun."
   fi
+}
+
+system_requirements_ready() {
+  # Read-only proof of the complete bootstrap requirements, not a user bypass.
+  # Do not run apt or authenticate merely to rerun an already complete install.
+  need_cmd dpkg-query || return 1
+  local package node_version
+  for package in ca-certificates curl git python3 python3-venv xz-utils unzip tar jq gnupg freecad nodejs npm; do
+    [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" == "install ok installed" ]] || return 1
+  done
+  if [[ "$(dpkg-query -W -f='${Status}' libfuse2 2>/dev/null)" != "install ok installed" ]] &&
+     [[ "$(dpkg-query -W -f='${Status}' libfuse2t64 2>/dev/null)" != "install ok installed" ]]; then
+    return 1
+  fi
+  for package in curl git python3 xz unzip tar jq gpg node npm freecadcmd; do
+    need_cmd "$package" || return 1
+  done
+  node_version="$(env -u NODE_OPTIONS -u NODE_PATH node --version 2>/dev/null)" || return 1
+  [[ "$node_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  version_ge "20.0.0" "${node_version#v}"
 }
 
 bootstrap_system_packages() {
@@ -275,6 +330,7 @@ has_tty() {
 script_dir=""
 work_src=""
 cleanup_dir=""
+orca_cleanup_dir=""
 resolve_source_tree() {
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [[ -f "$script_dir/SOUL.md" && -f "$script_dir/config.yaml" && -d "$script_dir/scripts" ]]; then
@@ -295,7 +351,7 @@ resolve_source_tree() {
   fi
 }
 
-trap '[[ -n "${cleanup_dir:-}" && -d "$cleanup_dir" ]] && rm -rf "$cleanup_dir"' EXIT
+trap '[[ -z "${cleanup_dir:-}" ]] || rm -rf "$cleanup_dir"; [[ -z "${orca_cleanup_dir:-}" ]] || rm -rf "$orca_cleanup_dir"; true' EXIT
 
 install_hermes_if_needed() {
   if need_cmd hermes; then
@@ -304,10 +360,10 @@ install_hermes_if_needed() {
   fi
   info "Hermes not found; installing via official installer."
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    echo "DRY-RUN: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup"
     return 0
   else
-    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup
     export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
     if [[ -f "$HOME/.bashrc" ]]; then
       # shellcheck disable=SC1090
@@ -317,50 +373,46 @@ install_hermes_if_needed() {
   need_cmd hermes || fail "Hermes was installed but is not on PATH. Try opening a new shell, then rerun this installer."
 }
 
+HERMES_SETUP_STATE="unknown"
+
 hermes_is_configured() {
-  [[ "$DRY_RUN" == "1" ]] && return 0
-  local provider="" model=""
-  provider="$(hermes config get model.provider 2>/dev/null || true)"
-  model="$(hermes config get model.default 2>/dev/null || true)"
-  [[ -n "$provider" && -n "$model" ]] || return 1
-  return 0
+  # Metadata alone (including provider=auto) is not authentication evidence.
+  # The isolated probe emits only a fixed enum: no runtime imports, login or refresh.
+  local helper="$work_src/scripts/hermes_setup_status.py" status="unknown" python="python3" candidate
+  local hermes_home="${HERMES_HOME:-$HOME/.hermes}"
+  [[ -f "$helper" ]] || fail "Hermes setup-status helper missing from source tree."
+  # The official Hermes venv provides PyYAML even on a minimal system Python.
+  for candidate in "$hermes_home/hermes-agent/.venv/bin/python" "$HOME/.hermes/hermes-agent/.venv/bin/python"; do
+    if [[ -x "$candidate" ]]; then python="$candidate"; break; fi
+  done
+  status="$("$python" -I -B "$helper" --hermes-home "$hermes_home" 2>/dev/null)" || status="unknown"
+  case "$status" in
+    local_credentials_present|refresh_needed|missing|unknown) HERMES_SETUP_STATE="$status" ;;
+    *) HERMES_SETUP_STATE="unknown" ;;
+  esac
+  [[ "$HERMES_SETUP_STATE" == "local_credentials_present" ]]
 }
 
 onboard_hermes_auth() {
-  if hermes_is_configured; then
-    info "Existing Hermes configuration found; keeping current provider/model."
-    return 0
-  fi
-  cat <<'EOF_SETUP'
-  - Hermes is installed but does not appear to have a model/provider configured yet.
-  - No credentials or API keys are copied from any other profile.
-  - Configure only your own Hermes/Nous/API access on this machine.
-EOF_SETUP
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: hermes setup --portal"
+    info "DRY-RUN: inspect existing Hermes setup locally; never start setup, Portal or OAuth."
     return 0
   fi
-  if has_tty; then
-    info "Starting official Hermes Portal setup (OAuth) for this user."
-    if hermes setup --portal; then
-      return 0
-    fi
-    warn "Portal setup did not complete. Starting the official quick setup wizard instead."
-    hermes setup --quick || fail "Hermes setup did not complete. Run 'hermes setup --portal' or 'hermes setup --quick' and then rerun this installer."
+  if hermes_is_configured; then
+    info "Existing Hermes configuration found; keeping current provider/model and credentials unchanged."
+    info "Selected provider/model and local credential evidence found; online authentication/model access not tested."
   else
-    cat >&2 <<'EOF_SETUP_NO_TTY'
-ERROR: Hermes needs first-time setup, but this shell has no interactive TTY.
-Run one of these commands as the target user, then rerun install.sh:
-
-  hermes setup --portal
-
-or, for the general setup wizard:
-
-  hermes setup --quick
-
-EOF_SETUP_NO_TTY
-    exit 1
+    warn "Hermes auth/setup pending"
+    info "Hermes is installed, but usable local provider authentication has not been established."
+    info "Existing configuration is unchanged. No credentials were created, copied or refreshed."
+    info "Kobra, OrcaSlicer, FreeCAD, KlipperMCP and read-only diagnostics will still be installed."
+    if [[ "$HERMES_SETUP_STATE" == "refresh_needed" ]]; then
+      info "Stored authentication needs renewal; this installer does not refresh it."
+    fi
+    info "Next step as your normal user: hermes model"
+    info "Alternatively run hermes setup manually. Choose and authenticate your own provider; no Portal login is started automatically."
   fi
+  return 0
 }
 
 install_node_if_needed() {
@@ -381,51 +433,14 @@ install_node_if_needed() {
 
 install_klippermcp() {
   KLIPPER_MCP_PATH="${KLIPPER_MCP_PATH:-$DEFAULT_KLIPPER_DIR}"
-  if [[ -e "$KLIPPER_MCP_PATH" && ! -d "$KLIPPER_MCP_PATH/.git" ]]; then
-    fail "KLIPPER_MCP_PATH exists but is not a git checkout: $KLIPPER_MCP_PATH"
-  fi
-  if [[ ! -d "$KLIPPER_MCP_PATH/.git" ]]; then
-    info "Cloning KlipperMCP to $KLIPPER_MCP_PATH"
-    run git clone "$KLIPPERMCP_REPO" "$KLIPPER_MCP_PATH"
-    if [[ "$DRY_RUN" != "1" ]]; then
-      git -C "$KLIPPER_MCP_PATH" fetch --tags --quiet origin
-      git -C "$KLIPPER_MCP_PATH" checkout --quiet "$KLIPPERMCP_COMMIT"
-    else
-      echo "DRY-RUN: git -C $KLIPPER_MCP_PATH fetch && checkout $KLIPPERMCP_COMMIT"
-    fi
-  else
-    info "Existing KlipperMCP checkout found: $KLIPPER_MCP_PATH"
-    if [[ "$DRY_RUN" != "1" ]]; then
-      local current_commit
-      current_commit="$(git -C "$KLIPPER_MCP_PATH" rev-parse --short HEAD)"
-      if [[ "$current_commit" != "$KLIPPERMCP_COMMIT" ]]; then
-        fail "Existing KlipperMCP checkout is at $current_commit, expected $KLIPPERMCP_COMMIT. Refusing to change an existing installation silently. Choose an empty KLIPPER_MCP_PATH or update it manually."
-      fi
-    else
-      echo "DRY-RUN: verify existing KlipperMCP is at $KLIPPERMCP_COMMIT"
-    fi
-  fi
-
-  local patch_file="$work_src/patches/klippermcp-kobra-upload.patch"
-  [[ -f "$patch_file" || "$DRY_RUN" == "1" ]] || fail "Patch not found: $patch_file"
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: verify/apply KlipperMCP patch idempotently"
-  elif git -C "$KLIPPER_MCP_PATH" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
-    info "KlipperMCP patch already applied."
-  elif git -C "$KLIPPER_MCP_PATH" apply --check "$patch_file" >/dev/null 2>&1; then
-    git -C "$KLIPPER_MCP_PATH" apply "$patch_file"
-    info "KlipperMCP patch applied."
-  else
-    fail "KlipperMCP patch does not apply cleanly and is not already applied. Refusing to modify it."
+    echo "DRY-RUN: verify full KlipperMCP commit $KLIPPERMCP_COMMIT and existing patch/dependencies/build without modification"
+    echo "DRY-RUN: only a fresh absent target uses pinned lockfile npm ci and npm run build; no upgrades or audit fix"
+    return 0
   fi
-
-  if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: npm install && npm run build in $KLIPPER_MCP_PATH"
-  else
-    npm --prefix "$KLIPPER_MCP_PATH" install
-    npm --prefix "$KLIPPER_MCP_PATH" run build
-    [[ -f "$KLIPPER_MCP_PATH/dist/index.js" ]] || fail "KlipperMCP build did not produce dist/index.js."
-  fi
+  local script="$work_src/scripts/klippermcp_setup.py"
+  [[ -f "$script" ]] || fail "KlipperMCP setup helper missing from source tree; nothing was changed."
+  python3 -B "$script" --path "$KLIPPER_MCP_PATH" --repo "$KLIPPERMCP_REPO" --commit "$KLIPPERMCP_COMMIT" --patch "$work_src/patches/klippermcp-kobra-upload.patch"
 }
 
 install_freecad() {
@@ -491,72 +506,69 @@ print(matches[0][1])
 PY
 }
 
+verify_orca_artifact() {
+  local path="$1" arch="$2" asset="${3:-}"
+  local args=(--manifest "$work_src/checksums/orcaslicer-${ORCA_VERSION}.json" --version "$ORCA_VERSION" --arch "$arch" --file "$path")
+  [[ -z "$asset" ]] || args+=(--asset "$asset")
+  python3 -B "$work_src/scripts/verify_orca.py" "${args[@]}"
+}
+
 install_orcaslicer() {
+  local arch asset_url asset_name metadata_file selection pinned_asset
+  arch="$(uname -m)"
   if [[ -z "$ORCA_INSTALL_DIR_USER_SET" && -z "${ORCA_SLICER_PATH:-}" && -z "${ORCA_PROFILE_ROOT:-}" && -x "$OPT_ORCA_APPIMAGE" && -d "$OPT_ORCA_PROFILE_ROOT" ]]; then
     ORCA_SLICER_PATH="$OPT_ORCA_APPIMAGE"
     ORCA_PROFILE_ROOT="$OPT_ORCA_PROFILE_ROOT"
-    info "Existing system-wide OrcaSlicer found; using it read-only: $ORCA_SLICER_PATH"
-    return 0
   fi
   ORCA_SLICER_PATH="${ORCA_SLICER_PATH:-$ORCA_APPIMAGE}"
   ORCA_PROFILE_ROOT="${ORCA_PROFILE_ROOT:-$ORCA_EXTRACT_DIR/resources/profiles/Anycubic}"
-  if [[ -x "$ORCA_SLICER_PATH" && -d "$ORCA_PROFILE_ROOT" ]]; then
-    info "OrcaSlicer found: $ORCA_SLICER_PATH"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    case "$arch" in
+      x86_64|amd64) ;;
+      *) fail "No approved additional Orca trust anchor for $arch; automatic install/reuse blocked." ;;
+    esac
+    echo "DRY-RUN: verify existing Orca or select exactly one official ${ORCA_VERSION} asset; require pinned SHA256 AND AUR Community SHA512 before installation/extraction"
     return 0
+  fi
+  pinned_asset="$(python3 -B "$work_src/scripts/verify_orca.py" --manifest "$work_src/checksums/orcaslicer-${ORCA_VERSION}.json" --version "$ORCA_VERSION" --arch "$arch")" || fail "No approved Orca checksum pin; no artifact was downloaded or executed."
+  if [[ -x "$ORCA_SLICER_PATH" && -d "$ORCA_PROFILE_ROOT" ]]; then
+    verify_orca_artifact "$ORCA_SLICER_PATH" "$arch" || fail "Existing Orca verification failed; installation kept unchanged."
+    info "Verified existing OrcaSlicer; keeping AppImage and extracted profiles unchanged."
+    return 0
+  fi
+  if [[ -e "$ORCA_SLICER_PATH" || -L "$ORCA_SLICER_PATH" || -e "$ORCA_EXTRACT_DIR" || -L "$ORCA_EXTRACT_DIR" ]]; then
+    fail "Incomplete existing Orca installation; refusing to overwrite it. Back up and resolve it explicitly."
   fi
   case "$ORCA_SLICER_PATH" in
     /opt/*|/usr/*|/bin/*|/sbin/*)
-      fail "Refusing to install or overwrite OrcaSlicer in system path '$ORCA_SLICER_PATH'. Existing system-wide OrcaSlicer may be used read-only, but new installs default to user-local '$ORCA_APPIMAGE'. Set ORCA_INSTALL_DIR to another user-writable path if needed."
+      fail "Refusing to install OrcaSlicer in system path '$ORCA_SLICER_PATH'. Use a user-local installation."
       ;;
   esac
-  local arch asset_url tmpdir asset_name metadata_file selection
-  arch="$(uname -m)"
-  info "Installing OrcaSlicer ${ORCA_VERSION} from official SoftFever GitHub release."
-  tmpdir="$(mktemp -d)"
-  metadata_file="$tmpdir/orca-release.json"
-  if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: query https://api.github.com/repos/SoftFever/OrcaSlicer/releases/tags/v${ORCA_VERSION} and select exactly one AppImage for $arch"
-    case "$arch" in
-      x86_64|amd64)
-        asset_name="OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCA_VERSION}.AppImage"
-        ;;
-      aarch64|arm64)
-        asset_name="OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCA_VERSION}.AppImage"
-        ;;
-      *) fail "Unsupported architecture for automatic OrcaSlicer install: $arch" ;;
-    esac
-    asset_url="https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/${asset_name}"
-  else
-    curl -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases/tags/v${ORCA_VERSION}" -o "$metadata_file"
-    selection="$(select_orca_asset "$arch" "$metadata_file")"
-    asset_name="$(printf '%s\n' "$selection" | sed -n '1p')"
-    asset_url="$(printf '%s\n' "$selection" | sed -n '2p')"
-    [[ -n "$asset_name" && -n "$asset_url" ]] || fail "Could not determine OrcaSlicer download asset."
-  fi
-  info "Selected OrcaSlicer asset: $asset_name"
-  if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: download $asset_url to $ORCA_SLICER_PATH and extract profiles to $ORCA_EXTRACT_DIR"
-    rm -rf "$tmpdir"
-    return 0
-  fi
-  curl -fL "$asset_url" -o "$tmpdir/OrcaSlicer.AppImage"
-  # If upstream checksum assets are present in the future, this block verifies them.
-  if curl -fsSL "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/SHA256SUMS" -o "$tmpdir/SHA256SUMS"; then
-    if grep -F " $asset_name" "$tmpdir/SHA256SUMS" >"$tmpdir/SHA256SUMS.one"; then
-      (cd "$tmpdir" && mv OrcaSlicer.AppImage "$asset_name" && sha256sum -c SHA256SUMS.one && mv "$asset_name" OrcaSlicer.AppImage)
-    else
-      warn "SHA256SUMS did not contain $asset_name; continuing with TLS-protected GitHub download only."
-    fi
-  else
-    warn "No upstream SHA256SUMS asset found for OrcaSlicer ${ORCA_VERSION}; continuing with TLS-protected GitHub download only."
-  fi
-  mkdir -p "$(dirname "$ORCA_SLICER_PATH")"
-  install -m 0755 "$tmpdir/OrcaSlicer.AppImage" "$ORCA_SLICER_PATH"
-  rm -rf "$tmpdir"
-  rm -rf "$ORCA_EXTRACT_DIR"
-  mkdir -p "$ORCA_EXTRACT_DIR"
-  (cd "$(dirname "$ORCA_EXTRACT_DIR")" && "$ORCA_SLICER_PATH" --appimage-extract >/dev/null)
-  [[ -d "$ORCA_PROFILE_ROOT" ]] || fail "OrcaSlicer profile root not found after extraction: $ORCA_PROFILE_ROOT"
+  [[ "$ORCA_PROFILE_ROOT" == "$ORCA_EXTRACT_DIR/resources/profiles/Anycubic" ]] || fail "Custom ORCA_PROFILE_ROOT must already exist; no silent profile-directory replacement."
+  info "Installing OrcaSlicer ${ORCA_VERSION} with reviewed repository checksum pins."
+  orca_cleanup_dir="$(mktemp -d)"
+  metadata_file="$orca_cleanup_dir/orca-release.json"
+  curl -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases/tags/v${ORCA_VERSION}" -o "$metadata_file" || fail "Orca release metadata download failed."
+  selection="$(select_orca_asset "$arch" "$metadata_file")" || fail "Orca release asset selection failed."
+  asset_name="$(printf '%s\n' "$selection" | sed -n '1p')"
+  asset_url="$(printf '%s\n' "$selection" | sed -n '2p')"
+  [[ "$asset_name" == "$pinned_asset" ]] || fail "Selected Orca asset differs from reviewed checksum pin."
+  case "$asset_url" in
+    "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCA_VERSION}/${asset_name}"|"https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCA_VERSION}/${asset_name}") ;;
+    *) fail "Orca asset URL is not the expected official release URL." ;;
+  esac
+  curl -fL "$asset_url" -o "$orca_cleanup_dir/OrcaSlicer.AppImage" || fail "Orca artifact download failed."
+  # One helper holds the verified descriptor through extraction and exclusive
+  # publication; no pathname reopen between checking and executing/copying.
+  python3 -B "$work_src/scripts/verify_orca.py" --manifest "$work_src/checksums/orcaslicer-${ORCA_VERSION}.json" --version "$ORCA_VERSION" --arch "$arch" --asset "$asset_name" --file "$orca_cleanup_dir/OrcaSlicer.AppImage" --extract "$orca_cleanup_dir" --publish "$ORCA_SLICER_PATH" || fail "Orca verification/extraction/publication failed; resolve any incomplete installation explicitly."
+  [[ -d "$orca_cleanup_dir/squashfs-root/resources/profiles/Anycubic" ]] || fail "Orca extracted profile root missing."
+  # Recheck immediately before publication; never remove an existing extraction.
+  [[ ! -e "$ORCA_EXTRACT_DIR" && ! -L "$ORCA_EXTRACT_DIR" ]] || fail "Orca extraction target appeared during download; refusing to overwrite it."
+  mkdir -p "$(dirname "$ORCA_EXTRACT_DIR")"
+  mv -T -n "$orca_cleanup_dir/squashfs-root" "$ORCA_EXTRACT_DIR"
+  [[ ! -d "$orca_cleanup_dir/squashfs-root" && -d "$ORCA_PROFILE_ROOT" ]] || fail "Orca extraction target changed; resolve the incomplete installation explicitly."
+  rm -rf "$orca_cleanup_dir"
+  orca_cleanup_dir=""
 }
 
 install_profile_files() {
@@ -564,14 +576,10 @@ install_profile_files() {
   local env_file="$profile_dir/.env"
   info "Installing Hermes profile to $profile_dir"
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: create/update profile files in $profile_dir without overwriting .env"
+    echo "DRY-RUN: install initial profile payload or keep all existing files unchanged; .env never overwritten"
     return 0
   fi
-  mkdir -p "$profile_dir"
-  cp -a "$work_src/SOUL.md" "$work_src/config.yaml" "$work_src/distribution.yaml" "$profile_dir/"
-  rm -rf "$profile_dir/scripts" "$profile_dir/patches"
-  cp -a "$work_src/scripts" "$work_src/patches" "$profile_dir/"
-  cp -a "$work_src/.env.EXAMPLE" "$profile_dir/.env.EXAMPLE"
+  python3 -B "$work_src/scripts/profile_config.py" --source "$work_src" --target "$profile_dir" || fail "Profile payload check failed; existing configuration was not automatically replaced."
 
   if [[ -f "$env_file" ]]; then
     if [[ "$KOBRA_PROFILE_CONFIG_LOADED" != "1" ]]; then
@@ -671,19 +679,30 @@ install_wrapper() {
   local bin_dir="$HOME/.local/bin"
   local wrapper="$bin_dir/kobra3d"
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY-RUN: install wrapper $wrapper"
+    echo "DRY-RUN: create missing kobra3d launcher with doctor dispatch; keep existing launchers unchanged"
+    return 0
+  fi
+  if [[ -e "$wrapper" || -L "$wrapper" ]]; then
+    info "Existing kobra3d launcher kept unchanged (including user edits)."
+    warn "An older launcher may not dispatch doctor; use bash install.sh --check from this clone instead."
     return 0
   fi
   mkdir -p "$bin_dir"
-  if [[ -e "$wrapper" ]] && ! grep -q "Hermes Kobra S1 wrapper" "$wrapper" 2>/dev/null; then
-    warn "Wrapper $wrapper already exists and was not created/changed."
-    return 0
+  if ! (
+    set -o noclobber
+    {
+      printf '%s\n' '#!/usr/bin/env bash' '# Hermes Kobra S1 wrapper' 'set -euo pipefail'
+      printf 'profile_dir=%q\n' "${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}"
+      printf '%s\n' \
+        'if [[ "${1:-}" == "doctor" ]]; then' \
+        '  shift' \
+        '  exec python3 -B "$profile_dir/scripts/doctor.py" --profile-dir "$profile_dir" --hermes-home "${HERMES_HOME:-$HOME/.hermes}" --source-dir "$profile_dir" "$@"' \
+        'fi' \
+        'exec hermes -p kobra-s1-3d-print chat "$@"'
+    } >"$wrapper"
+  ); then
+    fail "Launcher appeared concurrently or could not be created; refusing replacement."
   fi
-  cat >"$wrapper" <<'EOF_WRAP'
-#!/usr/bin/env bash
-# Hermes Kobra S1 wrapper
-exec hermes -p kobra-s1-3d-print chat "$@"
-EOF_WRAP
   chmod +x "$wrapper"
 }
 
@@ -739,7 +758,12 @@ EOF_MOONRAKER
 
 final_verify() {
   local hermes_status="missing" klipper_status="missing" freecad_status="missing" orca_status="missing" profile_status="missing"
-  need_cmd hermes && hermes_status="ready"
+  need_cmd hermes && hermes_status="installed (launcher present)"
+  local auth_status="Hermes auth/setup pending" auth_next="Complete LLM setup separately first: hermes model"
+  if [[ "$HERMES_SETUP_STATE" == "local_credentials_present" ]]; then
+    auth_status="local credentials present; online authentication/model access not tested"
+    auth_next="Existing configuration retained; online LLM access was not tested."
+  fi
   [[ -f "$KLIPPER_MCP_PATH/dist/index.js" || "$DRY_RUN" == "1" ]] && klipper_status="ready"
   [[ -x "$FREECADCMD_PATH" || "$DRY_RUN" == "1" ]] && freecad_status="ready"
   [[ -x "$ORCA_SLICER_PATH" && -d "$ORCA_PROFILE_ROOT" || "$DRY_RUN" == "1" ]] && orca_status="ready"
@@ -752,6 +776,7 @@ Installation complete.
 Printer:        Anycubic Kobra S1
 Moonraker:      ${MOONRAKER_STATUS:-not tested}
 Hermes:         $hermes_status
+Hermes LLM:     $auth_status
 Hermes profile: $profile_status
 KlipperMCP:     $klipper_status
 FreeCAD:        $freecad_status
@@ -760,7 +785,9 @@ ACE profile:    4-slot mapping configured (Slot 1 -> T0, Slot 2 -> T1, Slot 3 ->
 ACE hardware:   not verified by installer
 Project dir:    $PROJECT_DIR
 
-Start with:
+$auth_next
+
+After provider authentication, start with:
 
   hermes -p $PROFILE_NAME chat
 
@@ -788,11 +815,21 @@ main() {
     fail "/etc/os-release not found."
   fi
   info "Architecture: $(uname -m)"
-  configure_root_access
+  [[ "${EUID:-$(id -u)}" -ne 0 ]] || fail "Do not run this installer as root. Run it as your normal user so Hermes, KlipperMCP, the profile, .env and kobra3d are installed in that user's home directory."
   check_internet_dns
+  local system_ready=0
+  if [[ "$DRY_RUN" != "1" ]] && system_requirements_ready; then
+    system_ready=1
+  else
+    configure_root_access
+  fi
 
   step "Installing requirements..."
-  bootstrap_system_packages
+  if [[ "$system_ready" == "1" ]]; then
+    info "All required system packages and commands already present; skipping privileged bootstrap and root authentication."
+  else
+    bootstrap_system_packages
+  fi
 
   resolve_source_tree
 
@@ -829,5 +866,53 @@ main() {
   step "Final verification..."
   final_verify
 }
+
+update_config_mode() {
+  [[ "${EUID:-$(id -u)}" -ne 0 ]] || fail "Do not update a user profile as root."
+  local source_dir profile_dir
+  source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  profile_dir="${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}"
+  need_cmd python3 || fail "python3 is required for local configuration comparison; nothing was installed."
+  [[ -f "$source_dir/scripts/profile_config.py" ]] || fail "--update-config requires a complete local clone; no repository is downloaded."
+  local args=(--source "$source_dir" --target "$profile_dir" --update)
+  [[ "$DRY_RUN" != "1" ]] || args+=(--dry-run)
+  python3 -B "$source_dir/scripts/profile_config.py" "${args[@]}"
+}
+
+update_profiles_mode() {
+  [[ "${EUID:-$(id -u)}" -ne 0 ]] || fail "Do not update user Orca profiles as root."
+  local source_dir
+  source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  need_cmd python3 || fail "python3 is required for local profile comparison; nothing was installed."
+  [[ -f "$source_dir/scripts/update_orca_profiles.py" ]] || fail "--update-profiles requires a complete local clone; no repository is downloaded."
+  local args=(--profile-dir "${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}")
+  [[ "$DRY_RUN" != "1" ]] || args+=(--dry-run)
+  python3 -B "$source_dir/scripts/update_orca_profiles.py" "${args[@]}"
+}
+
+doctor_mode() {
+  local source_dir
+  source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  need_cmd python3 || fail "python3 is missing; doctor did not install anything."
+  [[ -f "$source_dir/scripts/doctor.py" ]] || fail "Doctor requires a complete local checkout; no files were downloaded."
+  local args=(--profile-dir "${PROFILE_DIR:-$DEFAULT_PROFILE_DIR}" --hermes-home "${HERMES_HOME:-$HOME/.hermes}" --source-dir "$source_dir")
+  [[ "$CHECK_OFFLINE" != "1" ]] || args+=(--offline)
+  exec python3 -B "$source_dir/scripts/doctor.py" "${args[@]}"
+}
+
+if [[ "$CHECK_MODE" == "1" ]]; then
+  doctor_mode
+  exit $?
+fi
+
+if [[ "$UPDATE_CONFIG" == "1" ]]; then
+  update_config_mode
+  exit $?
+fi
+
+if [[ "$UPDATE_PROFILES" == "1" ]]; then
+  update_profiles_mode
+  exit $?
+fi
 
 main "$@"

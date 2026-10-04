@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "version": "2.4.2",
+  "reviewed_on": "2026-10-03",
+  "trust_statement": "Pinned GitHub SHA256 plus a separately published, historically pinned AUR Community SHA512 for x86_64. This is not an authenticated upstream signature or build attestation. Both digests were checked against the same existing local x86_64 AppImage before pinning.",
+  "architectures": {
+    "x86_64": {
+      "asset": "OrcaSlicer_Linux_AppImage_Ubuntu2404_V2.4.2.AppImage",
+      "automatic_verification_approved": true,
+      "sha256": "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd",
+      "sha512": "90e7b535c100e2bd6dd9b5d6b2e20abde68770dee0aa6e2012d43f4ae722e5213ad65bebcd982bb071ef478486e22bc8c49a15d7dfd6ee4b862a14f93d41eeea",
+      "sha256_source": "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/tags/v2.4.2",
+      "community_anchor": {
+        "kind": "AUR Community PKGBUILD",
+        "package": "orca-slicer-bin 2.4.2-1",
+        "commit": "e1534f0c9d510c075e67c30e297e6efe3c4cfa15",
+        "url": "https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h=orca-slicer-bin&id=e1534f0c9d510c075e67c30e297e6efe3c4cfa15",
+        "upstream_authenticated_signature": false
+      }
+    },
+    "aarch64": {
+      "asset": "OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V2.4.2.AppImage",
+      "automatic_verification_approved": false,
+      "observed_github_sha256": "e1a07275a25f176626c55a5df39e91bc4476d8c28ee4a3192ff758e29dd5c3ba",
+      "reason": "Only the same-source GitHub digest is available; no comparable additional AppImage trust anchor has been reviewed. Automatic install/reuse is blocked, not claimed equally verified."
+    }
+  }
+}

@@ -48,4 +48,5 @@ distribution_owned:
   - .env.EXAMPLE
   - scripts
   - patches
+  - checksums
   - distribution.yaml
